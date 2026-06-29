@@ -5,7 +5,8 @@ import type { GenerateOptions, GenerateResult } from './types.js'
 
 export async function generateSql(input: string, options: GenerateOptions = {}): Promise<GenerateResult> {
   try {
-    const parsed = await parseNaturalLanguage(input, options)
+    const parseResult = await parseNaturalLanguage(input, options)
+    const parsed = parseResult.parsed
     const validation = validateParsedQuery(parsed)
 
     if (!validation.valid) {
@@ -24,7 +25,8 @@ export async function generateSql(input: string, options: GenerateOptions = {}):
         parsed,
         explanation: buildExplanation(parsed),
         warnings: validation.warnings,
-        fieldDescriptions: buildFieldDescriptions(parsed)
+        fieldDescriptions: buildFieldDescriptions(parsed),
+        llmTrace: parseResult.llmTrace
       }
     }
   } catch (error) {

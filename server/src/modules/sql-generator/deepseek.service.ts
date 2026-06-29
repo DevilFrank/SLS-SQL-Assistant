@@ -6,7 +6,9 @@ import type {
   FieldFromEvent,
   FilterCondition,
   GenerateOptions,
+  LlmMessageTrace,
   OrderByDefinition,
+  ParseResult,
   ParsedQuery,
   QueryIntent
 } from './types.js'
@@ -29,6 +31,14 @@ interface DeepSeekChatResponse {
   }
 }
 
+type DeepSeekChatRequest = OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & {
+  thinking?: {
+    type: 'enabled' | 'disabled'
+  }
+  reasoning_effort?: 'low' | 'medium' | 'high'
+  stream_options?: null
+}
+
 const allowedIntents = new Set<QueryIntent>([
   'group_count',
   'raw_filter',
@@ -39,9 +49,8 @@ const allowedIntents = new Set<QueryIntent>([
 
 export async function parseWithDeepSeek(
   input: string,
-  options: GenerateOptions,
-  ruleParsed: ParsedQuery
-): Promise<ParsedQuery> {
+  options: GenerateOptions
+): Promise<ParseResult> {
   loadDotEnv()
 
   const apiKey = process.env.DEEPSEEK_API_KEY
@@ -51,7 +60,7 @@ export async function parseWithDeepSeek(
   const temperature = Number(process.env.DEEPSEEK_TEMPERATURE ?? 0)
   const topP = Number(process.env.DEEPSEEK_TOP_P ?? 1)
   const thinkingType = process.env.DEEPSEEK_THINKING === 'enabled' ? 'enabled' : 'disabled'
-  const reasoningEffort = process.env.DEEPSEEK_REASONING_EFFORT ?? 'medium'
+  const reasoningEffort = normalizeReasoningEffort(process.env.DEEPSEEK_REASONING_EFFORT)
 
   if (!apiKey) {
     throw new Error('未配置 DEEPSEEK_API_KEY，请先在 .env 中添加 DeepSeek API Key。')
@@ -62,31 +71,30 @@ export async function parseWithDeepSeek(
     apiKey
   })
 
-  const requestBody: Record<string, unknown> = {
-    messages: [
-      {
-        role: 'system',
-        content: buildSystemPrompt()
-      },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          input,
-          options,
-          ruleParsedForReference: ruleParsed
-        })
-      }
-    ],
+  const messages: LlmMessageTrace[] = [
+    {
+      role: 'system',
+      content: buildSystemPrompt()
+    },
+    {
+      role: 'user',
+      content: JSON.stringify({
+        input,
+        options
+      })
+    }
+  ]
+
+  const requestBody: DeepSeekChatRequest = {
+    messages,
     model,
     thinking: { type: thinkingType },
     max_tokens: Number.isFinite(maxTokens) && maxTokens > 0 ? maxTokens : 2048,
     response_format: { type: 'json_object' },
-    stop: null,
     stream: false,
     stream_options: null,
     temperature: Number.isFinite(temperature) ? temperature : 0,
     top_p: Number.isFinite(topP) ? topP : 1,
-    tools: null,
     tool_choice: 'none',
     logprobs: false,
     top_logprobs: null
@@ -96,7 +104,7 @@ export async function parseWithDeepSeek(
     requestBody.reasoning_effort = reasoningEffort
   }
 
-  const payload = await openai.chat.completions.create(requestBody as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming) as DeepSeekChatResponse
+  const payload = await openai.chat.completions.create(requestBody) as DeepSeekChatResponse
 
   const choice = payload.choices?.[0]
   const finishReason = choice?.finish_reason
@@ -118,7 +126,31 @@ export async function parseWithDeepSeek(
     throw new Error('DeepSeek API 未返回解析结果。')
   }
 
-  return normalizeParsedQuery(parseJsonContent(content), ruleParsed, options)
+  const parsed = normalizeParsedQuery(parseJsonContent(content), options)
+
+  return {
+    parsed,
+    llmTrace: {
+      provider: 'deepseek',
+      model,
+      baseUrl,
+      messages: [
+        ...messages,
+        {
+          role: 'assistant',
+          content
+        }
+      ],
+      responseContent: content,
+      reasoningContent: choice?.message?.reasoning_content,
+      finishReason,
+      usage: {
+        promptTokens: payload.usage?.prompt_tokens,
+        completionTokens: payload.usage?.completion_tokens,
+        totalTokens: payload.usage?.total_tokens
+      }
+    }
+  }
 }
 
 function buildSystemPrompt(): string {
@@ -153,18 +185,22 @@ function parseJsonContent(content: string): unknown {
   }
 }
 
-function normalizeParsedQuery(raw: unknown, fallback: ParsedQuery, options: GenerateOptions): ParsedQuery {
+function normalizeParsedQuery(raw: unknown, options: GenerateOptions): ParsedQuery {
   if (!isRecord(raw)) {
     throw new Error('DeepSeek 返回 JSON 结构无效。')
   }
 
   const intent = allowedIntents.has(raw.intent as QueryIntent)
     ? raw.intent as QueryIntent
-    : fallback.intent
+    : undefined
+
+  if (!intent) {
+    throw new Error('DeepSeek 返回的 intent 无效。')
+  }
 
   const parsed: ParsedQuery = {
     intent,
-    filters: normalizeFilters(raw.filters, fallback.filters),
+    filters: normalizeFilters(raw.filters),
     metrics: [{ type: 'count', alias: 'cnt' }],
     orderBy: normalizeOrderBy(raw.orderBy),
     limit: normalizeLimit(raw.limit, intent, options)
@@ -193,17 +229,14 @@ function normalizeParsedQuery(raw: unknown, fallback: ParsedQuery, options: Gene
   if (typeof raw.dataJsonField === 'string' && /^[A-Za-z_][A-Za-z0-9_]*$/.test(raw.dataJsonField)) {
     parsed.dataJsonField = raw.dataJsonField
     parsed.groupBy = [raw.dataJsonField]
-  } else if (intent === 'data_json_group_count') {
-    parsed.dataJsonField = fallback.dataJsonField
-    parsed.groupBy = fallback.groupBy
   }
 
   return parsed
 }
 
-function normalizeFilters(raw: unknown, fallback: FilterCondition[]): FilterCondition[] {
+function normalizeFilters(raw: unknown): FilterCondition[] {
   if (!Array.isArray(raw)) {
-    return fallback
+    return []
   }
 
   const filters = raw.flatMap((item): FilterCondition[] => {
@@ -231,7 +264,7 @@ function normalizeFilters(raw: unknown, fallback: FilterCondition[]): FilterCond
     return []
   })
 
-  return filters.length > 0 ? filters : fallback
+  return filters
 }
 
 function normalizeStringArray(raw: unknown): string[] {
@@ -333,4 +366,12 @@ function normalizeLimit(raw: unknown, intent: QueryIntent, options: GenerateOpti
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function normalizeReasoningEffort(value: string | undefined): 'low' | 'medium' | 'high' {
+  if (value === 'low' || value === 'medium' || value === 'high') {
+    return value
+  }
+
+  return 'medium'
 }

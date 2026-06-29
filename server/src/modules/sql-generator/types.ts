@@ -53,7 +53,31 @@ export interface ParsedQuery {
 export interface GenerateOptions {
   defaultLimit?: number
   suMatchMode?: 'like' | '='
-  parserMode?: 'rules' | 'deepseek'
+}
+
+export interface LlmMessageTrace {
+  role: 'system' | 'user' | 'assistant'
+  content: string
+}
+
+export interface LlmTrace {
+  provider: 'deepseek'
+  model: string
+  baseUrl: string
+  messages: LlmMessageTrace[]
+  responseContent: string
+  reasoningContent?: string
+  finishReason?: string
+  usage?: {
+    promptTokens?: number
+    completionTokens?: number
+    totalTokens?: number
+  }
+}
+
+export interface ParseResult {
+  parsed: ParsedQuery
+  llmTrace?: LlmTrace
 }
 
 export interface GenerateSuccess {
@@ -65,6 +89,7 @@ export interface GenerateSuccess {
     explanation: string
     warnings: string[]
     fieldDescriptions: string[]
+    llmTrace?: LlmTrace
   }
 }
 

@@ -16,10 +16,27 @@ export interface GenerateResponse {
     explanation: string
     warnings: string[]
     fieldDescriptions: string[]
+    llmTrace?: {
+      provider: 'deepseek'
+      model: string
+      baseUrl: string
+      messages: Array<{
+        role: 'system' | 'user' | 'assistant'
+        content: string
+      }>
+      responseContent: string
+      reasoningContent?: string
+      finishReason?: string
+      usage?: {
+        promptTokens?: number
+        completionTokens?: number
+        totalTokens?: number
+      }
+    }
   }
 }
 
-export async function generateSql(input: string, parserMode: 'rules' | 'deepseek'): Promise<GenerateResponse> {
+export async function generateSql(input: string): Promise<GenerateResponse> {
   const response = await fetch('/api/sql/generate', {
     method: 'POST',
     headers: {
@@ -29,8 +46,7 @@ export async function generateSql(input: string, parserMode: 'rules' | 'deepseek
       input,
       options: {
         defaultLimit: 1000,
-        suMatchMode: 'like',
-        parserMode
+        suMatchMode: 'like'
       }
     })
   })

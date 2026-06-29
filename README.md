@@ -59,15 +59,14 @@ POST https://api.deepseek.com/chat/completions
 }
 ```
 
-前端页面的“解析方式”可在“本地规则”和“DeepSeek”之间切换。接口也可通过 `options.parserMode` 指定：
+前端页面默认只使用 DeepSeek 解析，并会展示本次请求发送给模型的 messages、模型原始返回、finish reason 和 token usage。接口请求示例：
 
 ```json
 {
   "input": "查询 su 是 https://www.fpffz.top/?channel=news01 的数据，按 type 和 trackType 分组显示",
   "options": {
     "defaultLimit": 1000,
-    "suMatchMode": "like",
-    "parserMode": "deepseek"
+    "suMatchMode": "like"
   }
 }
 ```
