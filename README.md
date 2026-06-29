@@ -34,7 +34,29 @@ npm run dev
 ```bash
 DEEPSEEK_API_KEY=你的 key
 DEEPSEEK_BASE_URL=https://api.deepseek.com
-DEEPSEEK_MODEL=deepseek-chat
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_MAX_TOKENS=2048
+DEEPSEEK_TEMPERATURE=0
+DEEPSEEK_TOP_P=1
+DEEPSEEK_THINKING=disabled
+# 如果 DEEPSEEK_THINKING=enabled，可设置 low / medium / high
+DEEPSEEK_REASONING_EFFORT=medium
+```
+
+当前实现没有引入 `openai` 或 `axios` 包，而是使用 Node.js 内置 `fetch` 直接请求：
+
+```text
+POST https://api.deepseek.com/chat/completions
+```
+
+这和 DeepSeek demo 中的 axios 请求是同一个接口。由于本项目需要稳定返回 `ParsedQuery`，所以默认使用：
+
+```json
+{
+  "response_format": { "type": "json_object" },
+  "thinking": { "type": "disabled" },
+  "temperature": 0
+}
 ```
 
 前端页面的“解析方式”可在“本地规则”和“DeepSeek”之间切换。接口也可通过 `options.parserMode` 指定：

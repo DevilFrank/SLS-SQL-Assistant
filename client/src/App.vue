@@ -1,5 +1,5 @@
 <template>
-  <SqlGenerator />
+	<SqlGenerator />
 </template>
 
 <script setup lang="ts">
